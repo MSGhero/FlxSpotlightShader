@@ -15,8 +15,10 @@ class SpotlightShader extends FlxGraphicsShader {
 		
 		// uniforms are stuff we pass into the shader from outside
 		// sampler2D is a bitmapdata
-		uniform sampler2D circlePos;
-		uniform vec2 wh;
+		uniform sampler2D spotlightData;
+		
+		uniform vec2 spriteWH;
+		uniform vec2 screenWH;
 		
 		// hardcoded max spotlight count. A float so we can do some math with it
 		const float MAX_SPOTLIGHT_COUNT = 3.0;
@@ -30,7 +32,7 @@ class SpotlightShader extends FlxGraphicsShader {
 			
 			// the default pixel position from OpenFL is a percentage, scale it up to real pixel values
 			// the percentage is nice sometimes, I'm just not very used to it
-			vec2 pos = openfl_TextureCoordv * wh;
+			vec2 pos = openfl_TextureCoordv * spriteWH;
 			
 			// (a shader god could optimize the following)
 			
@@ -42,37 +44,42 @@ class SpotlightShader extends FlxGraphicsShader {
 				
 				// shaders use percents to index into bitmaps... texture2D is the bitmap index function
 				// this grabs the < x = 0,1,2,..., y = 0 >-th pixel
-				vec4 samp = texture2D(circlePos, vec2(i / (MAX_SPOTLIGHT_COUNT - 1.0), 0.0));
+				vec4 samp = texture2D(spotlightData, vec2(i / (MAX_SPOTLIGHT_COUNT - 1.0), 0.0));
 				
 				// scale it up by the screen size because I like pixels and not percents
-				// future: you'd probably want to pass these in as uniforms
-				vec2 sampPos = samp.xy * vec2(640.0, 360.0);
+				vec2 sampPos = samp.xy * screenWH;
+				
+				// we encoded the radius into the bitmap as well. Scale it up from a percent
+				float radius = samp.z * 255;
 				
 				// point in circle check
-				if (distance(sampPos, pos) < 50.0) {
-					
-					// rgb = 0, alpha = 1
-					gl_FragColor = vec4(vec3(0.0), 1.0);
-				}
+				// this is equivalent to saying 'if the distance between the two points is less than the radius, set our pixel's RGB to 0'
+				// we're multiplying the original RGB by either 0 or 1 basically, and remembering to give it alpha = 1
+				gl_FragColor = vec4(gl_FragColor.rgb * step(radius, distance(sampPos, pos)), 1.0);
 			}
 			
 			// for each spotlight, now draw a smaller circle, filled with your lighting effect
 			// this deletes the unwanted outlines when circles intersect
 			for (int i = 0.0; i < MAX_SPOTLIGHT_COUNT; i++) {
 				
-				vec4 samp = texture2D(circlePos, vec2(i / (MAX_SPOTLIGHT_COUNT - 1.0), 0.0));
-				vec2 sampPos = samp.xy * vec2(640.0, 360.0);
+				vec4 samp = texture2D(spotlightData, vec2(i / (MAX_SPOTLIGHT_COUNT - 1.0), 0.0));
+				vec2 sampPos = samp.xy * screenWH;
+				float radius = samp.z * 255;
 				
-				// two parts, first is another circle intersection, but using a smaller radius this time (so the black circle from before ends up as an outline)
+				// how big we want the outline of the circles to be
+				float outlineThickness = 2.0;
+				
+				// two part condition, first is another point in circle check, but using a smaller radius this time (so the black circle from before ends up as an outline)
 				// second part is making sure we're not adding lighting to pure black pixels, just leaving them alone
-				if (distance(sampPos, pos) < 48.0 && temp.rgb != vec3(0.0)) {
-					
-					// this part can be anything, this is your 'blendmode'. I'm adding some lightness to the original pixel RGBs
-					// you can pass some parameters in as part of the encoded bitmap OR do some math here based off the distance or whatever
-					
-					// rgb += 0.2, alpha = 1
-					gl_FragColor = vec4(temp.rgb + 0.2, 1.0);
-				}
+				bool shouldBlend = step(radius - outlineThickness, distance(sampPos, pos)) < 0.5 && temp.rgb != vec3(0.0);
+				
+				// this part can be anything, this is your 'blendmode'. I'm adding some lightness to the original pixel RGBs
+				// you can pass some parameters in as part of the encoded bitmap OR do some math here based off the distance or whatever
+				vec4 blended = vec4(temp.rgb + 0.2, 1.0);
+				
+				// the mix function, used with a boolean float (0.0 or 1.0), means pick the first one if false or the second one if true
+				// we want to leave the pixel alone if we shouldn't blend it, or blend it if we want to
+				gl_FragColor = mix(gl_FragColor, blended, float(shouldBlend));
 			}
 		}
 	")
